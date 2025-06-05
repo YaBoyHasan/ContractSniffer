@@ -1,71 +1,129 @@
 # utils/false_positive_filter.py
 
-import re
 import os
-
-def has_modifier_guard(source_dir: str, function_name: str) -> bool:
-    """
-    Return True if `function_name` in any .sol file under source_dir
-    contains a known guard modifier (`onlyOwner` or `onlyAdmin`) in its signature or body.
-    """
-    # 1) Read all .sol files in source_dir into one big string
-    code = ""
-    for root, _, files in os.walk(source_dir):
-        for fname in files:
-            if fname.endswith(".sol"):
-                try:
-                    code += open(os.path.join(root, fname), "r", encoding="utf-8").read() + "\n"
-                except:
-                    pass
-
-    # 2) Find the function signature for function_name
-    #    Pattern: function <function_name>( ... ) [modifiers] { 
-    sig_pattern = re.compile(
-        rf"function\s+{re.escape(function_name)}\b[^\{{]*\{{", re.IGNORECASE
-    )
-    match = sig_pattern.search(code)
-    if not match:
-        return False  # function not found in source
-
-    # 3) Extract the function’s full body (from “{” to matching “}”)
-    start = match.end() - 1  # position of the opening brace '{'
-    depth = 1
-    idx = start + 1
-    while idx < len(code) and depth > 0:
-        if code[idx] == "{":
-            depth += 1
-        elif code[idx] == "}":
-            depth -= 1
-        idx += 1
-    body = code[start:idx]
-
-    # 4) Check for “onlyOwner” or “onlyAdmin” in signature or body
-    if re.search(r"\bonlyOwner\b", body) or re.search(r"\bonlyAdmin\b", body):
-        return True
-
-    return False
+import re
 
 def is_nonpublic(source_dir: str, function_name: str) -> bool:
     """
-    Return True if `function_name` is declared `private` or `internal`
-    anywhere under source_dir/*.sol. Otherwise False.
-
-    This helps catch Slither false positives on private/internal functions
-    (e.g. `sendETHToFee()` is private, so nobody external can ever call it).
+    Returns True if `function_name` is declared `private` or `internal` in any .sol file
+    under source_dir.
     """
-    code = ""
+    if not function_name:
+        return False
+
+    pattern = re.compile(
+        rf"function\s+{re.escape(function_name)}\b[^\)]*\)\s+(private|internal)\b",
+        re.IGNORECASE
+    )
+
     for root, _, files in os.walk(source_dir):
         for fname in files:
             if not fname.endswith(".sol"):
                 continue
+            path = os.path.join(root, fname)
             try:
-                code += open(os.path.join(root, fname), "r", encoding="utf-8").read() + "\n"
-            except:
+                code = open(path, "r", encoding="utf-8").read()
+            except Exception:
                 continue
 
-    # Look for lines like: `function sendETHToFee(…) private {` or `function sendETHToFee(...) internal {`
+            if pattern.search(code):
+                return True
+
+    return False
+
+
+def has_modifier_guard(source_dir: str, function_name: str) -> bool:
+    """
+    Returns True if `function_name` has an `onlyOwner`, `onlyAdmin`, or `onlyRole` modifier
+    in its declaration line under any .sol file in source_dir.
+    """
+    if not function_name:
+        return False
+
+    # Look for lines like:
+    #   function fnName(...) public onlyOwner { ... }
+    #   function fnName(...) external onlyAdmin { ... }
+    #   function fnName(...) external onlyRole(ADMIN) { ... }
     pattern = re.compile(
-        rf"function\s+{re.escape(function_name)}\b[^\)]*\)\s+(private|internal)\b", 
+        rf"function\s+{re.escape(function_name)}\b[^\)]*\)\s*(public|external)\s+(onlyOwner|onlyAdmin|onlyRole)\b",
         re.IGNORECASE
     )
-    return bool(pattern.search(code))
+
+    for root, _, files in os.walk(source_dir):
+        for fname in files:
+            if not fname.endswith(".sol"):
+                continue
+            path = os.path.join(root, fname)
+            try:
+                code = open(path, "r", encoding="utf-8").read()
+            except Exception:
+                continue
+
+            if pattern.search(code):
+                return True
+
+    return False
+
+
+def has_manual_owner_check(source_dir: str, function_name: str) -> bool:
+    """
+    Returns True if, inside the body of `function_name`, there is a check like
+    `require(msg.sender == owner)` or similar patterns. This catches manual owner checks
+    that Slither’s `has_modifier_guard` would miss.
+
+    We look for:
+      - `msg.sender == owner` or `owner == msg.sender`
+      - `require(msg.sender == owner` (anywhere in the function body)
+      - `hasRole(` (common OpenZeppelin AccessControl pattern)
+    """
+    if not function_name:
+        return False
+
+    # Roughly match the function definition and capture its body up to the matching brace.
+    # This is a simplistic approach and may break on deeply nested braces,
+    # but it works in most flattened sources.
+    func_block_pattern = re.compile(
+        rf"function\s+{re.escape(function_name)}\b[^\)]*\)\s*(public|external)\s*[^\{{]*\{{",
+        re.IGNORECASE
+    )
+
+    for root, _, files in os.walk(source_dir):
+        for fname in files:
+            if not fname.endswith(".sol"):
+                continue
+            path = os.path.join(root, fname)
+            try:
+                code = open(path, "r", encoding="utf-8").read()
+            except Exception:
+                continue
+
+            # Find the start index of "function fnName(...) {..."
+            match = func_block_pattern.search(code)
+            if not match:
+                continue
+
+            # Starting from the open brace of this function, extract until the matching closing brace.
+            start = match.end() - 1  # position of "{"
+            brace_counter = 0
+            body = ""
+            for i in range(start, len(code)):
+                c = code[i]
+                body += c
+                if c == "{":
+                    brace_counter += 1
+                elif c == "}":
+                    brace_counter -= 1
+                    if brace_counter == 0:
+                        break
+
+            # Now `body` contains everything from that first "{" to its matching "}".
+            # Look for patterns inside that snippet:
+            if re.search(r"msg\.sender\s*==\s*owner", body, re.IGNORECASE):
+                return True
+            if re.search(r"owner\s*==\s*msg\.sender", body, re.IGNORECASE):
+                return True
+            # Catch OZ AccessControl style: `require(hasRole(ADMIN_ROLE, msg.sender))`
+            if re.search(r"hasRole\s*\(", body, re.IGNORECASE):
+                return True
+
+    return False
