@@ -6,6 +6,7 @@ from utils.node_finder import get_working_public_nodes
 from utils.block_watcher import watch_new_contracts
 from utils.source_checker import is_code_verified
 from utils.slither_analyzer import run_slither, parse_slither_report
+from utils.false_positive_filter import has_modifier_guard
 
 # ANSI color codes
 GREEN  = "\033[92m"
@@ -43,7 +44,13 @@ def main():
             if not issues:
                 print(f"{GREEN}   ✅ No high‐impact issues found{RESET}")
             else:
-                print(f"{RED}   🚨 High‐impact issues: {issues}{RESET}")
+                # Slither only downloaded source into temp_sources/<address>, so pass that path
+                guarded = has_modifier_guard(source_dir, function_name=issues_function_name)
+                if guarded:
+                    print(f"   🟡 Skipped {issues_function_name}—found onlyOwner/onlyAdmin guard.")
+                    continue
+                else:
+                    print(f"{RED}   🚨 High‐impact issues: {issues}{RESET}")
 
     except KeyboardInterrupt:
         print(f"\n{YELLOW}✋ Stopping watcher. Goodbye!{RESET}")
