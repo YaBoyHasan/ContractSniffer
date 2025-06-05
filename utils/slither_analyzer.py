@@ -8,6 +8,9 @@ def run_slither(chain_slug, address):
     cmd = [
         "slither",
         f"{chain_slug}:{address}",
+        "--detect", "arbitrary-send-eth,reentrancy-eth,incorrect-return",
+        "--exclude-detectors", "solidity-safemath,arithmetic",
+        "--exclude-paths", r".*SafeMath\.sol|.*openzeppelin/.*|.*libraries/.*",
         "--solc-args", "--via-ir --optimize --allow-paths C:/Users/haych/Desktop/ContractSniffer",
         "--json", f"slither-reports/{address}.json",
     ]
@@ -23,16 +26,12 @@ def run_slither(chain_slug, address):
         print(f"[❌] Slither subprocess error for {address}: {e}")
         return False
 
-    # On Windows, Slither often returns a large non-zero code even when it compiles/finds issues
-    # So we treat *any* return code as “analysis succeeded,” and only inspect stderr if needed
     if proc.stderr:
         print(f"[⚠️] Slither reported issues or warnings for {address}")
     else:
         print(f"[✅] Slither ran clean (no issues) for {address}")
 
     return True
-
-# in utils/slither_analyzer.py, adjust parse_slither_report:
 
 def parse_slither_report(address):
     path = f"slither-reports/{address}.json"
