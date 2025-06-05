@@ -99,7 +99,7 @@ def find_true_arbitrary_send_vulns(address: str) -> list[str]:
     raw_findings = parse_slither_report(address)
 
     # Build the source directory path where the flattened .sol files live:
-    source_dir = f"crtyic-export/etherscan-contracts/{address}"
+    source_dir = f"crytic-export/etherscan-contracts/{address}"
 
     true_vulns: list[str] = []
     for check_name, fn in raw_findings:
