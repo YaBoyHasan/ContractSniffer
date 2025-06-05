@@ -44,3 +44,28 @@ def has_modifier_guard(source_dir: str, function_name: str) -> bool:
         return True
 
     return False
+
+def is_nonpublic(source_dir: str, function_name: str) -> bool:
+    """
+    Return True if `function_name` is declared `private` or `internal`
+    anywhere under source_dir/*.sol. Otherwise False.
+
+    This helps catch Slither false positives on private/internal functions
+    (e.g. `sendETHToFee()` is private, so nobody external can ever call it).
+    """
+    code = ""
+    for root, _, files in os.walk(source_dir):
+        for fname in files:
+            if not fname.endswith(".sol"):
+                continue
+            try:
+                code += open(os.path.join(root, fname), "r", encoding="utf-8").read() + "\n"
+            except:
+                continue
+
+    # Look for lines like: `function sendETHToFee(…) private {` or `function sendETHToFee(...) internal {`
+    pattern = re.compile(
+        rf"function\s+{re.escape(function_name)}\b[^\)]*\)\s+(private|internal)\b", 
+        re.IGNORECASE
+    )
+    return bool(pattern.search(code))
