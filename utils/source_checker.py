@@ -2,7 +2,7 @@ import requests
 import os
 import time
 
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "4Q3GTX7MJTE4KT8E444M8I6FA6J9GN1NPZ")
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")
 ETHERSCAN_URL = "https://api.etherscan.io/v2/api"
 
 def is_code_verified(addr, chain_id=1):
